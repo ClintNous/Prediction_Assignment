@@ -1,26 +1,89 @@
-
+Human Activity Recognition based on machine learning
 ===============
-submit to github, (compiled HTML file) 
-words <2000
-figure <5
-submit rep with a gp-pages brach (so the html page can be viewed online?
 
-The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. 
- 
+### Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this document a model is build to identifiy how well the particpant performed a barbell lift task. Data is used from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. T
 
-```{r}
+### Exploritory analyis 
+First the data is training and testing set is dowloaded from the server:
+```{r, results="hide",message=FALSE}
+library(caret)
 trainingdata_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
-testdata_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
-````
+dest_training <- "./pml-training.csv"
+download.file(trainingdata_url,dest_training)
+train_data <- read.csv(dest_training)
 
-
-### model selection
-You may use any of the other variables to predict with. You should create a report describing how you built your model,
-
+testingdata_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+dest_testing <- "./pml-testing.csv"
+download.file(testingdata_url,dest_testing)
+test_data <- read.csv(dest_testing)
+```
+The data consist of 160 varibales, most of which are measurement from motion sensors (accelerometers, gyros, magnets) To get a first grasp of the data the time series of three sensor are plotted:
+```{r}
+library(ggplot2)
+library(ggpubr)
+f1 <- ggplot(train_data,aes(x = raw_timestamp_part_1,y=accel_arm_x,color=classe)) + geom_point()
+f2 <- ggplot(train_data,aes(x = raw_timestamp_part_1,y=gyros_dumbbell_x,color=classe)) + geom_point()
+f3 <- ggplot(train_data,aes(x = raw_timestamp_part_1,y=magnet_belt_z,color=classe)) + geom_point()
+ggarrange(f1, f2,f3, ncol=3, nrow=1)
+```
+It can be be seen that measurement where taken at five specific points. At first site no clear pattern emerges. 
 
 ### cross validation
-how you used cross validation, what you think the expected out of sample error is
+To estimate the out of sample error we split the data set into a training and a test set. A clean split can be used since there are enough observation in the data-set, so no K-folds or similar approach is required:
 
+```{r}
+train_index <- createDataPartition(train_data$classe,p=0.7,list=FALSE)
+train <- train_data[train_index,] 
+test <- train_data[-train_index,]
+```
 
-### applied to test case
-You will also use your prediction model to predict 20 different test cases.
+### model selection
+Before training the model the variables with little information are removed:  
+
+```{r}
+na_count <-sapply(train_data, function(y) sum(length(which(is.na(y) | y==""))))
+train <- train[,!na_count > 19000]
+test <- test[,!na_count > 19000]
+train <- train[-c(1:7)]
+test <- test[-c(1:7)]
+```
+
+This brings the number of variables down from 160 to 53 variables. To bring down the amount of variables even further a linear model is fitted to which variables contribute the most to the model. All variables with a coeffient < 0.05 are removed from the data set: 
+
+```{r warning=FALSE}
+lm_fit <- lm(classe~.,data=train)
+var_small_coef <- abs(lm_fit$coefficients)>0.05 
+train <- train[c(var_small_coef[-1],TRUE)]
+test <- test[c(var_small_coef[-1],TRUE)]
+```
+
+Ten variables remain, with these variabels two models are training, one using the random forest algorithm and one using regulare regression trees. It is expected that the random forrest algorithm will perform better: 
+
+```{r warning=FALSE}
+rf_fit <- train(classe~.,data=train,method="rf")
+rpart_fit <- train(classe~.,data=train,method="rpart")
+```
+
+## Out of sample error 
+To determine the out of sample error rate. The created test is used. First the classe is predicted using our moddels and compared the real values by plotting the result in a confusionmatrix:
+
+```{R warning = FALSE}
+rf_predict <- predict(rf_fit,newdata=test)
+rpart_predict <- predict(rpart_fit,newdata=test)
+
+library(forecast)
+rf_matrix  <- confusionMatrix(rf_predict,test$classe)
+rpart_matrix <- confusionMatrix(rpart_predict,test$classe)
+rf_matrix  
+rpart_matrix
+```
+The accurary of the random forist is 0.836, while the regular regression tree only has an accuracy of 0.3592. The out of sample error is 1 - accurary. So 0.164 for the random forrest algorithm and 0.6408 for the regular regression tree. The random forrest model is selected for our final model. 
+
+### Apply model to test case
+We can use the model to predict the 'classe' value of our testcase as follows:
+
+```{R}
+rf_predict_testcase <- predict(rf_fit,newdata=test_data)
+rf_predict_testcase
+```
